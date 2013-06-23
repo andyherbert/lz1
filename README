@@ -179,3 +179,169 @@ For reference, the original size of the uncompressed code is 5111 bytes, compres
         printf("Decompressed: %u", file_lz77_decompress("./lz.c.z77", "lz-2.c"));
         return 0;
     }
+    
+
+
+
+    
+    the_odyssey.txt:  678171
+    
+    Compressed (1):   680083
+    Compressed (2):   437965
+    Compressed (3):   372199 * 54.88%
+    Compressed (4):   399466
+    Compressed (5):   444541
+    Compressed (6):   497605
+    Compressed (7):   561688
+    Compressed (8):   639040
+    Compressed (9):   734527
+    Compressed (10):  854881
+    Compressed (11): 1004944
+    Compressed (12): 1200883
+    Compressed (13): 1457752
+    Compressed (14): 1831507
+    Compressed (15): 1993543
+    
+    lz.c:             5872
+    
+    Compressed (1):   6112
+    Compressed (2):   3994
+    Compressed (3):   2707
+    Compressed (4):   2044
+    Compressed (5):   1894 * 32.25%
+    Compressed (6):   2032
+    Compressed (7):   2485
+    Compressed (8):   3124
+    Compressed (9):   3931
+    Compressed (10):  5362
+    Compressed (11):  7366
+    Compressed (12): 10879
+    Compressed (13): 12904
+    Compressed (14): 14251
+    Compressed (15): 14998
+    
+    mach_kernel:      8194272
+    
+    Compressed (1):   8566924
+    Compressed (2):   6171100
+    Compressed (3):   5012707
+    Compressed (4):   4768687 * 58.20%
+    Compressed (5):   4912633
+    Compressed (6):   5261968
+    Compressed (7):   5804539
+    Compressed (8):   6590989
+    Compressed (9):   7682254
+    Compressed (10):  9311959
+    Compressed (11): 11194129
+    Compressed (12): 13686307
+    Compressed (13): 16359478
+    Compressed (14): 18106570
+    Compressed (15): 18874819
+
+---
+
+After toying with the LZ1 algorithm, I began to wonder what the benefits would be of using different pointer lengths on various types of files. I decided that the first file to test would be a large plain-text document, so I chose The Odyssey by Homer, the second would be a much smaller file, the source code of the program itself, and finally an arbitrary binary file, mach_kernel, an operating system kernel found in the root directory of OS X. The results that follow include the original file-size in bytes, and quotes the bit-width of the pointer length value used for each test in brackets. The results are also measured in bytes, and the best result is marked with an asterisk. The value after the asterisk denotes the size of the compressed file as a percentage of the original.
+
+    The Odyssey:      678171             lz.c:             5872            mach_kernel:      8194272
+                                                                           
+    Compressed (1):   680083             Compressed (1):   6112            Compressed (1):   8566924
+    Compressed (2):   437965             Compressed (2):   3994            Compressed (2):   6171100
+    Compressed (3):   372199 * 54.88%    Compressed (3):   2707            Compressed (3):   5012707
+    Compressed (4):   399466             Compressed (4):   2044            Compressed (4):   4768687 * 58.20%
+    Compressed (5):   444541             Compressed (5):   1894 * 32.25    Compressed (5):   4912633
+    Compressed (6):   497605             Compressed (6):   2032            Compressed (6):   5261968
+    Compressed (7):   561688             Compressed (7):   2485            Compressed (7):   5804539
+    Compressed (8):   639040             Compressed (8):   3124            Compressed (8):   6590989
+    Compressed (9):   734527             Compressed (9):   3931            Compressed (9):   7682254
+    Compressed (10):  854881             Compressed (10):  5362            Compressed (10):  9311959
+    Compressed (11): 1004944             Compressed (11):  7366            Compressed (11): 11194129
+    Compressed (12): 1200883             Compressed (12): 10879            Compressed (12): 13686307
+    Compressed (13): 1457752             Compressed (13): 12904            Compressed (13): 16359478
+    Compressed (14): 1831507             Compressed (14): 14251            Compressed (14): 18106570
+    Compressed (15): 1993543             Compressed (15): 14998            Compressed (15): 18874819
+    
+
+The results are not really that surprising, the most gains to be found are with a bit-width of between three to five. The source code file, which contains many repeated references to function calls and variable names, produced the best results from the three files.
+
+I've included the code for the updated compress and decompress functions, which now allow an extra parameter to specify the pointer length bit-width. The pointer size still remains as a 16-bit integer, as anything smaller would negatively impact the efficiency of the program. Additionally, when the file is compressed, the pointer length is written as an 8-bit integer immediately after the uncompressed file-length value, and before the raw compressed data. This way, the bit-width of the pointer length can be stored dynamically for different files. Another small change was made to both routines - a pointer length of zero would never be used, so zero now represents one, one for two, and so on. Both of these alterations breaks compatibility with files written by the old routines.
+
+    #include <stdint.h>
+    #include <math.h>
+    
+    uint32_t lz77_compress (uint8_t *uncompressed_text, uint32_t uncompressed_size, uint8_t *compressed_text, uint8_t pointer_length_width)
+    {
+        uint16_t pointer_pos, temp_pointer_pos, output_pointer, pointer_length, temp_pointer_length;
+        uint32_t compressed_pointer, output_size, coding_pos, output_lookahead_ref, look_behind, look_ahead;
+        uint16_t pointer_pos_max, pointer_length_max;
+        pointer_pos_max = pow(2, 16 - pointer_length_width);
+        pointer_length_max = pow(2, pointer_length_width);
+        
+        *((uint32_t *) compressed_text) = uncompressed_size;
+        *(compressed_text + 4) = pointer_length_width;
+        compressed_pointer = output_size = 5;
+    
+        for(coding_pos = 0; coding_pos < uncompressed_size; ++coding_pos)
+        {
+            pointer_pos = 0;
+            pointer_length = 0;
+            for(temp_pointer_pos = 1; (temp_pointer_pos < pointer_pos_max) && (temp_pointer_pos <= coding_pos); ++temp_pointer_pos)
+            {
+                look_behind = coding_pos - temp_pointer_pos;
+                look_ahead = coding_pos;
+                for(temp_pointer_length = 0; uncompressed_text[look_ahead++] == uncompressed_text[look_behind++]; ++temp_pointer_length)
+                    if(temp_pointer_length == pointer_length_max)
+                        break;
+                if(temp_pointer_length > pointer_length)
+                {
+                    pointer_pos = temp_pointer_pos;
+                    pointer_length = temp_pointer_length;
+                    if(pointer_length == pointer_length_max)
+                        break;
+                }
+            }
+            coding_pos += pointer_length;
+            if((coding_pos == uncompressed_size) && pointer_length)
+            {
+                output_pointer = (pointer_length == 1) ? 0 : ((pointer_pos << pointer_length_width) | (pointer_length - 2));
+                output_lookahead_ref = coding_pos - 1;
+            }
+            else
+            {
+                output_pointer = (pointer_pos << pointer_length_width) | (pointer_length ? (pointer_length - 1) : 0);
+                output_lookahead_ref = coding_pos;
+            }
+            *((uint16_t *) (compressed_text + compressed_pointer)) = output_pointer;
+            compressed_pointer += 2;
+            *(compressed_text + compressed_pointer++) = *(uncompressed_text + output_lookahead_ref);
+            output_size += 3;
+        }
+        
+        return output_size;
+    }
+    
+    uint32_t lz77_decompress (uint8_t *compressed_text, uint8_t *uncompressed_text)
+    {
+        uint8_t pointer_length_width;
+        uint16_t input_pointer, pointer_length, pointer_pos, pointer_length_mask;
+        uint32_t compressed_pointer, coding_pos, pointer_offset, uncompressed_size;
+        
+        uncompressed_size = *((uint32_t *) compressed_text);
+        pointer_length_width = *(compressed_text + 4);
+        compressed_pointer = 5;
+        
+        pointer_length_mask = pow(2, pointer_length_width) - 1;
+        
+        for(coding_pos = 0; coding_pos < uncompressed_size; ++coding_pos)
+        {
+            input_pointer = *((uint16_t *) (compressed_text + compressed_pointer));
+            compressed_pointer += 2;
+            pointer_pos = input_pointer >> pointer_length_width;
+            pointer_length = pointer_pos ? ((input_pointer & pointer_length_mask) + 1) : 0;
+            if(pointer_pos)
+                for(pointer_offset = coding_pos - pointer_pos; pointer_length > 0; --pointer_length)
+                    uncompressed_text[coding_pos++] = uncompressed_text[pointer_offset++];
+            *(uncompressed_text + coding_pos) = *(compressed_text + compressed_pointer++);
+        }
+        
+        return coding_pos;
+    }
